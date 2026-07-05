@@ -97,7 +97,7 @@ export async function createCheckpointer() {
   const redisUrl = process.env.REDIS_URL;
   if (redisUrl) {
     try {
-      const { RedisSaver } = await import("@langchain/langgraph-checkpoint-redis");
+      const { RedisSaver } = await import("@langchain/langgraph-checkpoint-redis");//incase we forget to import the package
       const saver = await RedisSaver.fromUrl(redisUrl);
       console.log("✅ Redis checkpointer connected");
       return saver;
