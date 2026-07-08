@@ -39,7 +39,7 @@ export async function callGemini({
   userPrompt,
   agentName = "unknown",
   currentCost = 0,
-  tokenBudget = 2.0,
+  tokenBudget = 0.5,
   model = null,
 }) {
   const client = getClient();

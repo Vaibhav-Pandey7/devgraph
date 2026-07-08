@@ -172,7 +172,7 @@ async function main() {
     const finalState = await graph.invoke(
       {
         userRequirement: requirement,
-        tokenBudget: parseFloat(process.env.TOKEN_BUDGET || "2.0"),
+        tokenBudget: parseFloat(process.env.TOKEN_BUDGET || "0.5"),
       },
       config
     );
