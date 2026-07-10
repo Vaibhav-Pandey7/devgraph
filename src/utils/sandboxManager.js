@@ -15,7 +15,7 @@
  * 5. Health check everything
  */
 
-import { execSync } from "child_process";
+import { execSync, spawnSync } from "child_process";
 import fs from "fs";
 import path from "path";
 
@@ -37,17 +37,20 @@ try {
 
 function dockerExec(containerId, command, timeout = 30000) {
   try {
-    const stdout = execSync(
-      `docker exec ${containerId} sh -c '${command.replace(/'/g, "'\\''")}'`,
-      { encoding: "utf-8", timeout, stdio: "pipe" }
-    );
-    return { stdout: stdout || "", stderr: "", exitCode: 0 };
-  } catch (error) {
-    return {
-      stdout: error.stdout || "",
-      stderr: error.stderr || error.message,
-      exitCode: error.status || 1,
+    // spawnSync completely bypasses Windows CMD, eliminating all quote/string errors
+    const result = spawnSync("docker", ["exec", containerId, "sh", "-c", command], {
+      encoding: "utf-8",
+      timeout,
+      shell: false 
+    });
+    
+    return { 
+      stdout: result.stdout || "", 
+      stderr: result.stderr || "", 
+      exitCode: result.status ?? (result.error ? 1 : 0) 
     };
+  } catch (error) {
+    return { stdout: "", stderr: error.message, exitCode: 1 };
   }
 }
 
@@ -60,13 +63,19 @@ function ensureNetwork() {
   }
 }
 
+function sleepSync(ms) {
+  const sab = new SharedArrayBuffer(4);
+  const int32 = new Int32Array(sab);
+  Atomics.wait(int32, 0, 0, ms);
+}
+
 function waitForContainer(containerId, checkCmd, maxAttempts = 20) {
   for (let i = 0; i < maxAttempts; i++) {
     const result = dockerExec(containerId, checkCmd, 5000);
     if (result.exitCode === 0) return true;
-    execSync("sleep 1");
+    sleepSync(1000);
   }
-  return false;
+  return false; 
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -160,6 +169,8 @@ export async function createSandbox(folderStructure, dependencies, dbSchema) {
   ].join("\n") + "\n");
 
   // ─── Step 4: Initialize Git ───────────────────────────────
+  // ✅ FIX: Tell Git to ignore node_modules and .env files
+  fs.writeFileSync(path.join(sandboxPath, ".gitignore"), "node_modules\n.env\n");
 
   try {
     execSync("git init", { cwd: sandboxPath, stdio: "pipe" });
@@ -192,7 +203,7 @@ export async function createSandbox(folderStructure, dependencies, dbSchema) {
           `-v ${volumeName}:/data/db`,
           "-e MONGO_INITDB_DATABASE=appdb",
           "mongo:7",
-        ].join(" "), { encoding: "utf-8", stdio: "pipe", timeout: 60000 }).trim();
+        ].join(" "), { encoding: "utf-8", stdio: "pipe", timeout: 300000 }).trim();
 
         console.log(`   🗄️  MongoDB container: ${dbContainerId.slice(0, 12)}`);
         console.log("   ⏳ Waiting for MongoDB to be ready...");
@@ -209,7 +220,7 @@ export async function createSandbox(folderStructure, dependencies, dbSchema) {
           "-e POSTGRES_PASSWORD=postgres",
           "-e POSTGRES_DB=appdb",
           "postgres:16-alpine",
-        ].join(" "), { encoding: "utf-8", stdio: "pipe", timeout: 60000 }).trim();
+        ].join(" "), { encoding: "utf-8", stdio: "pipe", timeout: 300000 }).trim();
 
         console.log(`   🗄️  PostgreSQL container: ${dbContainerId.slice(0, 12)}`);
         console.log("   ⏳ Waiting for PostgreSQL to be ready...");
@@ -251,7 +262,7 @@ export async function createSandbox(folderStructure, dependencies, dbSchema) {
         "-e NODE_ENV=development",
         "node:20-slim",
         "tail -f /dev/null",
-      ].join(" "), { encoding: "utf-8", stdio: "pipe", timeout: 30000 }).trim();
+      ].join(" "), { encoding: "utf-8", stdio: "pipe", timeout: 300000 }).trim();
 
       console.log(`   🖥️  Backend container: ${backendContainerId.slice(0, 12)}`);
 
@@ -272,7 +283,7 @@ export async function createSandbox(folderStructure, dependencies, dbSchema) {
         `-e VITE_API_URL=http://${backendContainerName}:5000/api`,
         "node:20-slim",
         "tail -f /dev/null",
-      ].join(" "), { encoding: "utf-8", stdio: "pipe", timeout: 30000 }).trim();
+      ].join(" "), { encoding: "utf-8", stdio: "pipe", timeout: 300000 }).trim();
 
       console.log(`   🎨 Frontend container: ${frontendContainerId.slice(0, 12)}`);
 
@@ -284,7 +295,7 @@ export async function createSandbox(folderStructure, dependencies, dbSchema) {
 
     } catch (e) {
       console.warn(`   ⚠️ Docker setup failed: ${e.message}`);
-      console.warn("   Falling back to local-only mode");
+      throw new Error("ABORTING: Cannot safely execute AI code without Docker sandbox.");
     }
   }
 
@@ -374,7 +385,7 @@ export async function reconnectSandbox(sandboxId) {
         `-v ${volumeName}:/data/db`,
         "-e MONGO_INITDB_DATABASE=appdb",
         "mongo:7",
-      ].join(" "), { encoding: "utf-8", stdio: "pipe", timeout: 60000 }).trim();
+      ].join(" "), { encoding: "utf-8", stdio: "pipe", timeout: 300000 }).trim();
       console.log("   ⏳ Waiting for MongoDB...");
       waitForContainer(dbContainerId, "mongosh --eval 'db.runCommand({ping:1})' --quiet", 30);
     } else {
@@ -387,7 +398,7 @@ export async function reconnectSandbox(sandboxId) {
         "-e POSTGRES_PASSWORD=postgres",
         "-e POSTGRES_DB=appdb",
         "postgres:16-alpine",
-      ].join(" "), { encoding: "utf-8", stdio: "pipe", timeout: 60000 }).trim();
+      ].join(" "), { encoding: "utf-8", stdio: "pipe", timeout: 300000 }).trim();
       console.log("   ⏳ Waiting for PostgreSQL...");
       waitForContainer(dbContainerId, "pg_isready -U postgres", 30);
     }
@@ -407,7 +418,7 @@ export async function reconnectSandbox(sandboxId) {
       "-e NODE_ENV=development",
       "node:20-slim",
       "tail -f /dev/null",
-    ].join(" "), { encoding: "utf-8", stdio: "pipe", timeout: 30000 }).trim();
+    ].join(" "), { encoding: "utf-8", stdio: "pipe", timeout: 300000 }).trim();
 
     console.log("   📦 Installing backend dependencies...");
     dockerExec(backendContainerId, "cd /app/backend && npm install 2>&1", 120000);
@@ -424,7 +435,7 @@ export async function reconnectSandbox(sandboxId) {
       `-e VITE_API_URL=http://${backendContainerName}:5000/api`,
       "node:20-slim",
       "tail -f /dev/null",
-    ].join(" "), { encoding: "utf-8", stdio: "pipe", timeout: 30000 }).trim();
+    ].join(" "), { encoding: "utf-8", stdio: "pipe", timeout: 300000 }).trim();
 
     console.log("   📦 Installing frontend dependencies...");
     dockerExec(frontendContainerId, "cd /app/frontend && npm install 2>&1", 120000);
@@ -632,19 +643,11 @@ export function executeCommand(sandboxId, command, timeout = 30000) {
     return dockerExec(sandbox.backendContainerId, command, timeout);
   }
 
-  // Local fallback
-  try {
-    const stdout = execSync(command, {
-      cwd: sandbox.path, timeout, stdio: "pipe", encoding: "utf-8",
-    });
-    return { stdout: stdout || "", stderr: "", exitCode: 0 };
-  } catch (error) {
-    return {
-      stdout: error.stdout || "",
-      stderr: error.stderr || error.message,
-      exitCode: error.status || 1,
-    };
-  }
+  // No container available — refuse rather than run unsandboxed on host
+  throw new Error(
+    `Sandbox ${sandboxId} has no active Docker container. Refusing to execute command on host.`
+  );
+
 }
 
 // ═══════════════════════════════════════════════════════════════
