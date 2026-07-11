@@ -5,7 +5,7 @@
  * Instead of infinite retries, we break it into 2-3 smaller tasks.
  */
 
-import { callGemini, makeTokenDelta } from "../utils/gemini.js";
+import { safeCallGemini, callGemini, makeTokenDelta, emptyTokenDelta } from "../utils/gemini.js";
 
 const SIMPLIFY_PROMPT = `You are analyzing a coding task that failed multiple times and needs to be broken into smaller pieces.
 
@@ -34,13 +34,19 @@ export async function simplifyTaskNode(state) {
 
   const userPrompt = `FAILED TASK:\n${JSON.stringify(currentTask, null, 2)}\n\nREJECTION HISTORY:\n${JSON.stringify(reviewResult?.issues || [], null, 2)}`;
 
-  const result = await callGemini({
+  const result = await safeCallGemini({
     systemPrompt: SIMPLIFY_PROMPT,
     userPrompt,
     agentName: "simplifyTask",
     currentCost: state.tokenUsage?.estimatedCost || 0,
     tokenBudget: state.tokenBudget,
   });
+
+
+  if (!result.ok) {
+    console.error(`   [simplifyTask] LLM failed: ${result.error}`);
+    return { error: `simplifyTask failed: ${result.error}`, tokenUsage: emptyTokenDelta("simplifyTask") };
+  }
 
   const output = result.parsed;
   const subTasks = output.subTasks || [];

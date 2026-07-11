@@ -1,7 +1,6 @@
 /**
  * updateRegistry.js — File Registry Updater
  * 
- * FIRST PRINCIPLES:
  * When the Coder writes User.js, future tasks need to know:
  * "What does User.js export? What functions? What arguments?"
  * 
@@ -16,7 +15,7 @@
  * A small LLM call is cheaper than a full AST parser dependency.
  */
 
-import { callGemini, makeTokenDelta } from "../utils/gemini.js";
+import { safeCallGemini, callGemini, makeTokenDelta, emptyTokenDelta } from "../utils/gemini.js";
 import { readFile } from "../utils/sandboxManager.js";
 
 const REGISTRY_PROMPT = `You are analyzing JavaScript/JSX files to extract their public interface.
@@ -72,15 +71,15 @@ export async function updateRegistryNode(state) {
     return {};
   }
 
-  // Read the actual file contents from sandbox
+  // Read the actual file contents from sandbox (skip error files)
   const fileContents = [];
   for (const file of coderOutput.files) {
+    if (file.error) continue; // Skip files that failed to generate
     try {
       const content = readFile(sandboxId, file.path);
       if (content) {
-        // Send first 80 lines max — enough for interface extraction
-        const truncated = content.split("\n").slice(0, 80).join("\n");
-        fileContents.push({ path: file.path, content: truncated });
+        // Read full file — with one-file-per-call, files are typically 60-120 lines
+        fileContents.push({ path: file.path, content });
       }
     } catch (e) {
       console.warn(`   ⚠️ Could not read ${file.path}: ${e.message}`);
@@ -96,13 +95,19 @@ export async function updateRegistryNode(state) {
     `--- ${f.path} ---\n${f.content}\n`
   ).join("\n");
 
-  const result = await callGemini({
+  const result = await safeCallGemini({
     systemPrompt: REGISTRY_PROMPT,
     userPrompt,
     agentName: "updateRegistry",
     currentCost: state.tokenUsage?.estimatedCost || 0,
     tokenBudget: state.tokenBudget,
   });
+
+
+  if (!result.ok) {
+    console.error(`   [updateRegistry] LLM failed: ${result.error}`);
+    return { error: `updateRegistry failed: ${result.error}`, tokenUsage: emptyTokenDelta("updateRegistry") };
+  }
 
   const registryEntries = result.parsed.files || [];
 

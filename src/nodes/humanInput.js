@@ -5,20 +5,21 @@
  * When the PM Agent asks questions, we need to pause the graph,
  * get the user's answer, and resume.
  * 
- * In production: this would be a WebSocket/API call.
- * In Phase 1: we use terminal readline for simplicity.
+ * DUAL MODE:
+ * - CLI mode (default): uses readline to ask via terminal
+ * - Server mode: uses InputBridge to pause and wait for WebSocket response
  * 
- * LangGraph supports this natively via `interrupt()` — the graph
- * pauses at this node and resumes when we provide input.
- * For now we handle it manually via a CLI prompt.
+ * How it decides: checks if an InputBridge exists for this run.
+ * The server's graphRunner.js registers a bridge before starting the graph.
+ * If no bridge exists, we're in CLI mode.
  */
 
-import * as readline from "readline";//built in Nodejs
+import * as readline from "readline";
 
 /**
- * Ask the user a question via terminal and return their answer
+ * Ask the user a question via terminal (CLI mode)
  */
-function askUser(question) {
+function askUserCLI(question) {
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
@@ -33,16 +34,29 @@ function askUser(question) {
 }
 
 /**
+ * Try to get the InputBridge (server mode).
+ * Returns null if we're in CLI mode.
+ */
+async function getInputBridge() {
+  try {
+    const { inputBridges } = await import("../../server/services/graphRunner.js");
+    // Find any active bridge (there should be exactly one during a run)
+    for (const [, bridge] of inputBridges) {
+      return bridge;
+    }
+  } catch (e) {
+    // Server module not available — we're in CLI mode
+  }
+  return null;
+}
+
+/**
  * Human Input node function
  * 
  * Displays PM Agent's questions and collects user's answers.
- * Returns the answers as part of the conversation history.
+ * Works in both CLI and server (WebSocket) mode.
  */
 export async function humanInputNode(state) {
-  console.log("\n" + "═".repeat(60));
-  console.log("  👤 YOUR INPUT NEEDED");
-  console.log("═".repeat(60));
-  
   const questions = state.pmQuestions;
   
   if (!questions || questions.length === 0) {
@@ -50,25 +64,37 @@ export async function humanInputNode(state) {
     return {};
   }
 
-  console.log("\n  Please answer the PM Agent's questions.\n");
-  console.log("  💡 TIP: You can answer all at once, separated by commas,");
-  console.log("     or just give a general description.\n");
+  // ─── Check if we're in server mode ─────────────────────
+  const bridge = await getInputBridge();
 
-  // Display all questions
-  questions.forEach((q, i) => {
-    console.log(`  ${i + 1}. ${q}`);
-  });
+  let answer;
 
-  console.log("");
+  if (bridge) {
+    // SERVER MODE: pause the graph and wait for WebSocket response
+    console.log("  [humanInput] Waiting for user response via dashboard...");
+    const response = await bridge.waitForInput("pm_clarification", { questions });
+    answer = response?.answers || response?.data?.answers || JSON.stringify(response);
+    console.log("  [humanInput] Got response from dashboard");
+  } else {
+    // CLI MODE: original readline behavior
+    console.log("\n" + "═".repeat(60));
+    console.log("  YOUR INPUT NEEDED");
+    console.log("═".repeat(60));
+    console.log("\n  Please answer the PM Agent's questions.\n");
 
-  const answer = await askUser("  Your answers: ");
+    questions.forEach((q, i) => {
+      console.log(`  ${i + 1}. ${q}`);
+    });
 
-  console.log("\n  ✅ Got it! Sending your answers to the PM Agent...\n");
+    console.log("");
+    answer = await askUserCLI("  Your answers: ");
+    console.log("\n  Got it! Sending your answers to the PM Agent...\n");
+  }
 
   return {
     pmConversation: [
       { role: "user", answers: answer },
     ],
-    pmStatus: "idle",  // Reset so PM agent processes answers
+    pmStatus: "idle",
   };
 }

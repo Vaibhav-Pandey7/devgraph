@@ -2,7 +2,7 @@
  * pmAgent.js — Project Manager Agent (Fixed Token Tracking)
  */
 
-import { callGemini, makeTokenDelta } from "../utils/gemini.js";
+import { safeCallGemini, callGemini, makeTokenDelta, emptyTokenDelta } from "../utils/gemini.js";
 
 const PM_SYSTEM_PROMPT = `You are the PM Agent in an AI software development team.
 
@@ -84,13 +84,19 @@ export async function pmAgentNode(state) {
     userPrompt += `\nNow generate the FINAL spec incorporating all the user's answers. Return status: "spec_ready".`;
   }
 
-  const result = await callGemini({
+  const result = await safeCallGemini({
     systemPrompt: PM_SYSTEM_PROMPT,
     userPrompt,
     agentName: "pmAgent",
     currentCost: state.tokenUsage?.estimatedCost || 0,
     tokenBudget: state.tokenBudget,
   });
+
+
+  if (!result.ok) {
+    console.error(`   [pmAgent] LLM failed: ${result.error}`);
+    return { error: `pmAgent failed: ${result.error}`, tokenUsage: emptyTokenDelta("pmAgent") };
+  }
 
   const response = result.parsed;
   const tokenDelta = makeTokenDelta("pmAgent", result.tokens);

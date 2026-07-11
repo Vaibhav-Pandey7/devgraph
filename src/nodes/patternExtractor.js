@@ -1,5 +1,5 @@
 /**
- * patternExtractor.js — Code Pattern Extractor
+ * patternExtractor.js — Code Pattern Extractor 
  * 
  * Phase 1 code establishes conventions: how errors are handled,
  * how responses are formatted, what import style is used.
@@ -12,7 +12,7 @@
  * camelCase in Phase 1 and switches to snake_case in Phase 3.
  */
 
-import { callGemini, makeTokenDelta } from "../utils/gemini.js";
+import { safeCallGemini, callGemini, makeTokenDelta, emptyTokenDelta } from "../utils/gemini.js";
 import { readFile, getFileList } from "../utils/sandboxManager.js";
 
 const PATTERN_PROMPT = `You are analyzing code files to extract exact coding patterns. Be VERY specific — include actual code snippets, not descriptions.
@@ -70,13 +70,19 @@ export async function patternExtractorNode(state) {
     } catch (e) { /* skip */ }
   }
 
-  const result = await callGemini({
+  const result = await safeCallGemini({
     systemPrompt: PATTERN_PROMPT,
     userPrompt: codeContent,
     agentName: "patternExtractor",
     currentCost: state.tokenUsage?.estimatedCost || 0,
     tokenBudget: state.tokenBudget,
   });
+
+
+  if (!result.ok) {
+    console.error(`   [patternExtractor] LLM failed: ${result.error}`);
+    return { error: `patternExtractor failed: ${result.error}`, tokenUsage: emptyTokenDelta("patternExtractor") };
+  }
 
   const patterns = result.parsed;
 

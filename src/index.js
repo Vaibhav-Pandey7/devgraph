@@ -44,9 +44,9 @@ function printBanner() {
   console.log("");
   console.log("╔══════════════════════════════════════════════════════════╗");
   console.log("║                                                          ║");
-  console.log("║    DevGraph— Multi-Agent Development System     ║");
+  console.log("║    🤖  DevGraph — Multi-Agent Development System     ║");
   console.log("║                                                          ║");
-  console.log("║           PM + Architect + Planner + Sandbox          ║");
+  console.log("║          Full Dev Loop — AI Writes Code!             ║");
   console.log("║                                                         ║");
   console.log("║                                                          ║");
   console.log("╚══════════════════════════════════════════════════════════╝");
@@ -139,43 +139,89 @@ async function main() {
   // 3. Build graph
   const graph = buildGraph({ checkpointer });
 
-  // 4. Get requirement from CLI args or prompt
-  let requirement = process.argv.slice(2).join(" ");
-  
-  if (!requirement) {
-    console.log("  What do you want to build?\n");
-    console.log("  Examples:");
-    console.log('  - "Build a todo app with categories and due dates"');
-    console.log('  - "Create an e-commerce store with admin panel"');
-    console.log('  - "Build a blog platform with comments and tags"\n');
-    requirement = await askUser("  Your idea: ");
-  }
+  // 4. Check for --resume flag
+  const args = process.argv.slice(2);
+  const resumeIndex = args.indexOf("--resume");
+  let isResume = false;
+  let threadId;
+  let requirement;
 
-  if (!requirement) {
-    console.log("  No requirement provided. Exiting.");
-    process.exit(0);
-  }
+  if (resumeIndex !== -1) {
+    // Resume mode: node src/index.js --resume <thread-id>
+    threadId = args[resumeIndex + 1];
+    if (!threadId) {
+      console.log("  ❌ Usage: node src/index.js --resume <thread-id>");
+      console.log("  Thread IDs are printed when you start a project.");
+      process.exit(1);
+    }
+    isResume = true;
+    requirement = ""; // Not needed — state already has it
+    console.log(`  🔄 RESUMING thread: ${threadId}\n`);
+    console.log("─".repeat(60));
+  } else {
+    // New project
+    requirement = args.join(" ");
 
-  console.log(`\n  📝 Requirement: "${requirement}"\n`);
-  console.log("─".repeat(60));
+    if (!requirement) {
+      console.log("  What do you want to build?\n");
+      console.log("  Examples:");
+      console.log('  - "Build a todo app with categories and due dates"');
+      console.log('  - "Create an e-commerce store with admin panel"');
+      console.log('  - "Build a blog platform with comments and tags"\n');
+      requirement = await askUser("  Your idea: ");
+    }
+
+    if (!requirement) {
+      console.log("  No requirement provided. Exiting.");
+      process.exit(0);
+    }
+
+    threadId = `project-${Date.now()}`;
+    console.log(`\n  📝 Requirement: "${requirement}"`);
+    console.log(`  🧵 Thread ID: ${threadId}  (save this to resume if needed)\n`);
+    console.log("─".repeat(60));
+  }
 
   // 5. Run the graph
-  const threadId = `project-${Date.now()}`;
   const config = {
     configurable: {
       thread_id: threadId,
     },
+    recursionLimit: 500,
   };
 
   try {
-    // Invoke the graph with initial state
-    const finalState = await graph.invoke(
-      {
-        userRequirement: requirement,
-        tokenBudget: parseFloat(process.env.TOKEN_BUDGET || "0.5"),
-      },
-      config
-    );
+    let finalState;
+
+    if (isResume) {
+      // Resume — first get the saved state to find sandboxId
+      const savedState = await graph.getState(config);
+
+      if (savedState?.values?.sandboxId) {
+        console.log(`  📦 Found sandbox: ${savedState.values.sandboxId}`);
+        
+        // Reconnect Docker containers to existing sandbox folder
+        const { reconnectSandbox } = await import("./utils/sandboxManager.js");
+        const reconnected = await reconnectSandbox(savedState.values.sandboxId);
+        
+        if (!reconnected) {
+          console.log("  ❌ Could not reconnect sandbox. Start a fresh run.");
+          process.exit(1);
+        }
+      }
+
+      // Now resume the graph
+      finalState = await graph.invoke(null, config);
+    } else {
+      // New project — invoke with initial state
+      finalState = await graph.invoke(
+        {
+          userRequirement: requirement,
+          tokenBudget: parseFloat(process.env.TOKEN_BUDGET || "2.0"),
+        },
+        config
+      );
+    }
 
     // 6. Display results
     if (finalState.clarifiedSpec) {
@@ -221,7 +267,7 @@ async function main() {
       console.log("\n  ⚠️ No output generated.");
     }
 
-    console.log("\n  ✅ Phase 3 complete! Sandbox ready for coding in Phase 4.\n");
+    console.log("\n  ✅ Done! Check the sandbox for your generated project.\n");
 
     // 7. Token usage summary
     printTokenSummary(finalState.tokenUsage);

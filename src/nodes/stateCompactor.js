@@ -1,6 +1,7 @@
 /**
- * stateCompactor.js — State Compressor 
+ * stateCompactor.js — State Compressor
  * 
+ * FIRST PRINCIPLES:
  * LangGraph state grows with every task. After 15 tasks, the state
  * might have 15 coderOutputs, 15 executionResults, 15 reviewResults.
  * Most of this is dead data — only the current task's data matters.

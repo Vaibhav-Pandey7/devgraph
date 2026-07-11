@@ -30,7 +30,7 @@ async function runTest() {
     pmQuestions: [],
     pmConversation: [],
     tokenUsage: { calls: [], totalInput: 0, totalOutput: 0, estimatedCost: 0 },
-    tokenBudget: 0.5,
+    tokenBudget: 2.0,
   };
 
   const result1 = await pmAgentNode(state1);
@@ -53,7 +53,7 @@ async function runTest() {
         { role: "user", answers: "Categories, due dates, priority. Yes auth. Single user role. Clean UI." },
       ],
       tokenUsage: { calls: [], totalInput: 0, totalOutput: 0, estimatedCost: 0 },
-      tokenBudget: 0.5,
+      tokenBudget: 2.0,
     };
 
     const result2 = await pmAgentNode(state2);

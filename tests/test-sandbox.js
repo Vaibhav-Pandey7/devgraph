@@ -103,21 +103,17 @@ app.listen(PORT, () => console.log("Server running on port " + PORT));
     }
 
     // ─── Test 5: Git Snapshot & Rollback ───
-// ─── Test 5: Git Snapshot & Rollback ───
-    console.log("\n   ─── Test 5: Git Snapshot & Rollback ───\n");
+    console.log("\n  ─── Test 5: Git Snapshot & Rollback ───\n");
 
     const snap1 = snapshot(sandboxId, "Added server");
-    // ✅ Modified to print the actual error if it fails
-    assert(snap1.success, `Snapshot 1: ${snap1.tag || snap1.error}`);
+    assert(snap1.success, `Snapshot: ${snap1.tag}`);
 
     writeFile(sandboxId, "backend/src/models/User.js", 'export class User {}');
     const snap2 = snapshot(sandboxId, "Added User model");
-    // ✅ Modified to print the actual error
-    assert(snap2.success, `Snapshot 2: ${snap2.tag || snap2.error}`);
+    assert(snap2.success, `Snapshot: ${snap2.tag}`);
 
-    const rb = rollback(sandboxId, snap1.tag || "v0.1.0");
-    // ✅ Modified to print the actual error
-    assert(rb.success, `Rollback: ${rb.rolledBackTo || rb.error}`);
+    const rb = rollback(sandboxId, snap1.tag);
+    assert(rb.success, `Rollback to ${snap1.tag}`);
 
     // ─── Test 6: File listing ───
     console.log("\n  ─── Test 6: File Listing ───\n");
@@ -125,6 +121,7 @@ app.listen(PORT, () => console.log("Server running on port " + PORT));
     const files = getFileList(sandboxId);
     assert(files.length > 0, `Found ${files.length} files`);
     assert(files.some(f => f.includes("package.json")), "Has package.json");
+
 
     // ─── Test 7: Cleanup ───
     console.log("\n  ─── Test 7: Destroy Sandbox ───\n");

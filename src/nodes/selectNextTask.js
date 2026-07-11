@@ -44,7 +44,7 @@ export function selectNextTaskNode(state) {
 
         return {
           currentTask: task,
-          currentPhaseIndex: phase.phaseNumber - 1,//for array like indexing
+          currentPhaseIndex: phase.phaseNumber - 1,
           taskStatuses: { [task.taskId]: "in_progress" },
           currentPhase: "dev_loop",
         };

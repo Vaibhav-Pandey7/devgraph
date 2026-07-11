@@ -12,7 +12,7 @@
  * Step 1 generates the naming map. Steps 2-5 receive it and MUST follow it.
  */
 
-import { callGemini, makeTokenDelta } from "../utils/gemini.js";
+import { safeCallGemini, callGemini, makeTokenDelta, emptyTokenDelta } from "../utils/gemini.js";
 
 const NAMING_RULES = `
 STRICT NAMING CONVENTION (you MUST follow this):
@@ -61,13 +61,19 @@ RULES:
 export async function architectStep1Node(state) {
   console.log("\n🏗️  [Architect Step 1/5] Identifying entities & naming map...\n");
 
-  const result = await callGemini({
+  const result = await safeCallGemini({
     systemPrompt: STEP1_PROMPT,
     userPrompt: `Project Specification:\n${JSON.stringify(state.clarifiedSpec, null, 2)}`,
     agentName: "architectStep1",
     currentCost: state.tokenUsage?.estimatedCost || 0,
     tokenBudget: state.tokenBudget,
   });
+
+
+  if (!result.ok) {
+    console.error(`   Architect step 1 failed: ${result.error}`);
+    return { error: `Architect step 1 failed: ${result.error}`, tokenUsage: emptyTokenDelta("architectStep1") };
+  }
 
   const entities = result.parsed.entities || result.parsed;
   console.log(`   Found ${entities.length} entities:`);
@@ -132,13 +138,19 @@ export async function architectStep2Node(state) {
     ? `\n\nPREVIOUS VALIDATION ISSUES TO FIX:\n${JSON.stringify(validationIssues, null, 2)}`
     : "";
 
-  const result = await callGemini({
+  const result = await safeCallGemini({
     systemPrompt: STEP2_PROMPT,
     userPrompt: `Entity Naming Map (use these EXACT table names):\n${JSON.stringify(entityNames, null, 2)}\n\nFull Entities:\n${JSON.stringify(state.blueprint.entities, null, 2)}\n\nSpec:\n${JSON.stringify(state.clarifiedSpec, null, 2)}${fixContext}`,
     agentName: "architectStep2",
     currentCost: state.tokenUsage?.estimatedCost || 0,
     tokenBudget: state.tokenBudget,
   });
+
+
+  if (!result.ok) {
+    console.error(`   Architect step 2 failed: ${result.error}`);
+    return { error: `Architect step 2 failed: ${result.error}`, tokenUsage: emptyTokenDelta("architectStep2") };
+  }
 
   const schema = result.parsed;
   console.log(`   DB: ${schema.databaseType} — ${schema.tables?.length || 0} tables`);
@@ -197,13 +209,19 @@ export async function architectStep3Node(state) {
     ? `\n\nPREVIOUS VALIDATION ISSUES TO FIX:\n${JSON.stringify(validationIssues, null, 2)}`
     : "";
 
-  const result = await callGemini({
+  const result = await safeCallGemini({
     systemPrompt: STEP3_PROMPT,
     userPrompt: `Entity Naming Map:\n${JSON.stringify(entityMap, null, 2)}\n\nDB Schema:\n${JSON.stringify(state.blueprint.dbSchema, null, 2)}\n\nSpec:\n${JSON.stringify(state.clarifiedSpec, null, 2)}${fixContext}`,
     agentName: "architectStep3",
     currentCost: state.tokenUsage?.estimatedCost || 0,
     tokenBudget: state.tokenBudget,
   });
+
+
+  if (!result.ok) {
+    console.error(`   Architect step 3 failed: ${result.error}`);
+    return { error: `Architect step 3 failed: ${result.error}`, tokenUsage: emptyTokenDelta("architectStep3") };
+  }
 
   const endpoints = result.parsed.apiEndpoints || result.parsed;
   console.log(`   Designed ${Array.isArray(endpoints) ? endpoints.length : 0} API endpoints`);
@@ -252,13 +270,19 @@ export async function architectStep4Node(state) {
     ? `\n\nPREVIOUS VALIDATION ISSUES TO FIX:\n${JSON.stringify(validationIssues, null, 2)}`
     : "";
 
-  const result = await callGemini({
+  const result = await safeCallGemini({
     systemPrompt: STEP4_PROMPT,
     userPrompt: `API Endpoints:\n${JSON.stringify(state.blueprint.apiEndpoints, null, 2)}\n\nSpec:\n${JSON.stringify(state.clarifiedSpec, null, 2)}${fixContext}`,
     agentName: "architectStep4",
     currentCost: state.tokenUsage?.estimatedCost || 0,
     tokenBudget: state.tokenBudget,
   });
+
+
+  if (!result.ok) {
+    console.error(`   Architect step 4 failed: ${result.error}`);
+    return { error: `Architect step 4 failed: ${result.error}`, tokenUsage: emptyTokenDelta("architectStep4") };
+  }
 
   const pages = result.parsed.frontendPages || result.parsed;
   console.log(`   Designed ${Array.isArray(pages) ? pages.length : 0} pages`);
@@ -306,13 +330,19 @@ export async function architectStep5Node(state) {
 
   const { dbSchema, apiEndpoints, frontendPages } = state.blueprint;
 
-  const result = await callGemini({
+  const result = await safeCallGemini({
     systemPrompt: STEP5_PROMPT,
     userPrompt: `DB: ${dbSchema?.databaseType} (${dbSchema?.tables?.length} tables)\nAPIs: ${apiEndpoints?.length} endpoints\nPages: ${frontendPages?.length} pages\n\nSpec:\n${JSON.stringify(state.clarifiedSpec, null, 2)}`,
     agentName: "architectStep5",
     currentCost: state.tokenUsage?.estimatedCost || 0,
     tokenBudget: state.tokenBudget,
   });
+
+
+  if (!result.ok) {
+    console.error(`   Architect step 5 failed: ${result.error}`);
+    return { error: `Architect step 5 failed: ${result.error}`, tokenUsage: emptyTokenDelta("architectStep5") };
+  }
 
   const output = result.parsed;
   console.log(`   Folder structure generated`);

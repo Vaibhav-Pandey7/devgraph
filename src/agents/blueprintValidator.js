@@ -1,5 +1,5 @@
 /**
- * blueprintValidator.js — Blueprint Cross-Validator 
+ * blueprintValidator.js — Blueprint Cross-Validator
  * 
  * In the V1 design, the Architect's output went directly to the Planner.
  * Problem: if the Architect designed an API endpoint for a table that 
@@ -62,7 +62,6 @@ export async function blueprintValidatorNode(state) {
         .toLowerCase();
       const plainName = entity.name.toLowerCase(); // "todoitem"
 
-    //we used set here as it provides O(1) lookup
       const hasTable = tableNames.has(plainName) ||
                        tableNames.has(plainName + "s") ||
                        tableNames.has(snakeName) ||
@@ -201,7 +200,7 @@ export async function blueprintValidatorNode(state) {
     for (const table of dbSchema.tables) {
       // Skip junction/join tables and common system tables
       const name = table.name.toLowerCase();
-      const isJunction = name.includes("_") && !["created_at", "updated_at"].some(f => name.includes(f));//for junction tables
+      const isJunction = name.includes("_") && !["created_at", "updated_at"].some(f => name.includes(f));
       
       if (!referencedTables.has(name) && !isJunction) {
         issues.push({

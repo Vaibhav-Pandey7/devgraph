@@ -10,7 +10,7 @@
  * Tier 3: Give up, escalate to human
  */
 
-import { callGemini, makeTokenDelta } from "../utils/gemini.js";
+import { safeCallGemini, callGemini, makeTokenDelta, emptyTokenDelta } from "../utils/gemini.js";
 import { readFile, getFileList, rollback } from "../utils/sandboxManager.js";
 
 const DEBUGGER_PROMPT = `You are the Debugger Agent in an AI software development team.
@@ -113,13 +113,19 @@ export async function debuggerAgentNode(state) {
 
   const userPrompt = `ERROR:\n${errors}\n\nTASK: ${currentTask?.title}\nFILES TO FIX: ${failingFiles.join(", ")}\n\nCODE:\n${contextFiles}`;
 
-  const result = await callGemini({
+  const result = await safeCallGemini({
     systemPrompt: DEBUGGER_PROMPT,
     userPrompt,
     agentName: "debuggerAgent",
     currentCost: state.tokenUsage?.estimatedCost || 0,
     tokenBudget: state.tokenBudget,
   });
+
+
+  if (!result.ok) {
+    console.error(`   [debuggerAgent] LLM failed: ${result.error}`);
+    return { error: `debuggerAgent failed: ${result.error}`, tokenUsage: emptyTokenDelta("debuggerAgent") };
+  }
 
   const debug = result.parsed;
   console.log(`   🔍 Root cause: ${debug.rootCause}`);
@@ -149,10 +155,9 @@ export async function debuggerAgentNode(state) {
 }
 
 /**
- * Router: if tier 3 → humanEscalation, else → coderAgent (retry with fix)
+ * Router: if tier 3 → humanEscalation, else → contextBuilder (fresh context for retry)
  */
 export function debuggerRouter(state) {
   if (state.debugState?.tier >= 3) return "humanEscalation";
-  if (state.debugState?.rollbackAttempted && state.debugState?.tier === 1) return "coderAgent"; // Fresh retry after rollback
-  return "coderAgent";
+  return "contextBuilder";
 }

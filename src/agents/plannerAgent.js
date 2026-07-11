@@ -5,7 +5,7 @@
  * so the generated project can run with: docker-compose up
  */
 
-import { callGemini, makeTokenDelta } from "../utils/gemini.js";
+import { safeCallGemini, callGemini, makeTokenDelta, emptyTokenDelta } from "../utils/gemini.js";
 
 const PLANNER_PROMPT = `You are the Planner Agent in an AI software development team.
 
@@ -56,13 +56,28 @@ RULES:
 - Phase 5 (frontend pages) tasks are parallelizable.
 - Give each task a unique taskId: "phaseName-N".
 - Keep task count 15-25 for a typical CRUD app.
-- Phase 7 MUST include a task that creates:
-  - backend/Dockerfile
-  - frontend/Dockerfile
-  - docker-compose.yml (at project root)
-  - Updated README with "docker-compose up" instructions
-  The docker-compose.yml must start database + backend + frontend with proper networking.
-- File paths should NOT start with / (use relative: "backend/src/..." not "/backend/src/...")`;
+
+IMPORTANT — THESE FILES ALREADY EXIST (scaffolded automatically, do NOT create them):
+- backend/src/config/db.js (DB connection pool)
+- backend/src/middleware/auth.js (JWT auth middleware)
+- backend/src/index.js (Express entry — routes are auto-wired after your route tasks complete)
+- frontend/index.html, frontend/src/main.jsx, frontend/src/App.jsx (auto-assembled)
+- frontend/src/index.css, frontend/tailwind.config.js, frontend/postcss.config.js, frontend/vite.config.js
+- frontend/src/utils/api.js (axios instance with auth interceptor)
+- .gitignore, all .env files
+
+So your Phase 1 (setup) should ONLY create files that are project-SPECIFIC:
+- Maybe a frontend AuthContext if auth is needed
+- Maybe backend utility helpers specific to this app
+- Do NOT recreate db.js, auth middleware, api.js, or config files.
+
+Phase 6 (integration): Do NOT create backend/src/index.js or frontend/src/App.jsx — they are AUTO-ASSEMBLED from the route and page files you create in earlier phases. If you need an integration task, use it for wiring specific features (e.g. a shared layout component, or connecting auth flow).
+
+Phase 7 (deployment): Include ONLY a README.md task. Docker files are auto-generated.
+
+- File paths should NOT start with / (use relative: "backend/src/..." not "/backend/src/...")
+- Backend models MUST use the file name format from the entity map: e.g., if entity.modelFile = "todoItem", the file is "backend/src/models/todoItem.js"
+- Backend routes MUST match: e.g., if entity.routeFile = "todoItemRoutes", file is "backend/src/routes/todoItemRoutes.js"`;
 
 export async function plannerAgentNode(state) {
   console.log("\n📋 [Planner Agent] Creating build plan...\n");
@@ -99,13 +114,19 @@ export async function plannerAgentNode(state) {
     frontendDeps: Object.keys(blueprint.dependencies?.frontend?.dependencies || {}),
   };
 
-  const result = await callGemini({
+  const result = await safeCallGemini({
     systemPrompt: PLANNER_PROMPT,
     userPrompt: `App: ${clarifiedSpec.appName}\n\nBlueprint:\n${JSON.stringify(blueprintSummary, null, 2)}\n\nSpec:\n${JSON.stringify(clarifiedSpec, null, 2)}`,
     agentName: "plannerAgent",
     currentCost: state.tokenUsage?.estimatedCost || 0,
     tokenBudget: state.tokenBudget,
   });
+
+
+  if (!result.ok) {
+    console.error(`   [plannerAgent] LLM failed: ${result.error}`);
+    return { error: `plannerAgent failed: ${result.error}`, tokenUsage: emptyTokenDelta("plannerAgent") };
+  }
 
   const plan = result.parsed;
 

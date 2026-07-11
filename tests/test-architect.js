@@ -43,7 +43,6 @@ async function runTest() {
   // Track total calls manually
   let totalCalls = 0;
   let totalCost = 0;
-  //since we are not using langgraph so we have to manually change these and keeping them inside state can lead to ai hallucinating and changing them which we dont want so instead we do this outside state manualy
 
   const emptyToken = { calls: [], totalInput: 0, totalOutput: 0, estimatedCost: 0 };
 

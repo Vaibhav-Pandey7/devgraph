@@ -75,15 +75,6 @@ async function runTest() {
   assert(result.taskQueue?.phases?.length > 0, `Has ${result.taskQueue.phases.length} phases`);
   assert(result.taskQueue?.phases?.length >= 3, `At least 3 phases (got ${result.taskQueue.phases.length})`);
   
-  //[
-//   [Task1, Task2], // Phase 1 tasks
-//   [Task3],        // Phase 2 tasks
-//   [Task4, Task5]  // Phase 3 tasks
-//     ]
-// flatMap does two things at the same time:
-// Map: It extracts the tasks array from each phase.
-// Flatten: It instantly smashes all those separate arrays together into one giant, flat array.
-//[Task1, Task2, Task3, Task4, Task5]
   const allTasks = result.taskQueue.phases.flatMap(p => p.tasks || []);
   assert(allTasks.length > 0, `Has ${allTasks.length} total tasks`);
   assert(allTasks.length <= 25, `Reasonable task count (<= 25, got ${allTasks.length})`);

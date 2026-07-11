@@ -19,6 +19,8 @@
 import { Annotation } from "@langchain/langgraph";
 
 /**
+ * The complete state definition for AI Dev Team V2
+ * 
  * Every node reads from and writes to this state.
  * Each field has a comment explaining which node owns it.
  */

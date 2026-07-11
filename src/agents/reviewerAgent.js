@@ -1,7 +1,6 @@
 /**
  * reviewerAgent.js — Code Reviewer
  * 
- * FIRST PRINCIPLES:
  * The Coder writes code, but LLMs make mistakes — wrong imports,
  * missing error handling, inconsistent patterns. The Reviewer catches
  * these BEFORE execution, saving expensive debug cycles.
@@ -13,7 +12,7 @@
  * task gets broken into smaller pieces instead of infinite retry loops.
  */
 
-import { callGemini, makeTokenDelta } from "../utils/gemini.js";
+import { safeCallGemini, callGemini, makeTokenDelta, emptyTokenDelta } from "../utils/gemini.js";
 import { readFile } from "../utils/sandboxManager.js";
 
 const REVIEWER_PROMPT = `You are the Reviewer Agent in an AI software development team.
@@ -56,7 +55,12 @@ export async function reviewerAgentNode(state) {
   const { currentTask, coderOutput, sandboxId, contextPackage } = state;
 
   if (!currentTask || !coderOutput?.files?.length) {
-    console.log("   ⚠️ Nothing to review");
+    // If coder returned an error, reject so it routes back for retry
+    if (coderOutput?.error) {
+      console.log("   Coder failed — rejecting for retry");
+      return { reviewResult: { verdict: "rejected", issues: [coderOutput.notes || "Code generation failed"], reviewCycle: currentCycle + 1 } };
+    }
+    console.log("   Nothing to review — skipping");
     return { reviewResult: { verdict: "approved", issues: [], reviewCycle: 0 } };
   }
 
@@ -84,13 +88,19 @@ export async function reviewerAgentNode(state) {
     }
   }
 
-  const result = await callGemini({
+  const result = await safeCallGemini({
     systemPrompt: REVIEWER_PROMPT,
     userPrompt,
     agentName: "reviewerAgent",
     currentCost: state.tokenUsage?.estimatedCost || 0,
     tokenBudget: state.tokenBudget,
   });
+
+
+  if (!result.ok) {
+    console.error(`   [reviewerAgent] LLM failed: ${result.error}`);
+    return { error: `reviewerAgent failed: ${result.error}`, tokenUsage: emptyTokenDelta("reviewerAgent") };
+  }
 
   const review = result.parsed;
   const verdict = review.verdict || "approved";
@@ -115,12 +125,12 @@ export async function reviewerAgentNode(state) {
 }
 
 /**
- * Router: approved → executor, rejected (≤2) → coder, rejected (>2) → simplifyTask
+ * Router: approved → executor, rejected (≤2) → contextBuilder (refreshes context), rejected (>2) → simplifyTask
  */
 export function reviewerRouter(state) {
   const { verdict, reviewCycle } = state.reviewResult || {};
 
   if (verdict === "approved") return "executorAgent";
   if (reviewCycle >= 3) return "simplifyTask";
-  return "coderAgent"; // Retry with feedback
+  return "contextBuilder"; // Retry with FRESH context
 }
