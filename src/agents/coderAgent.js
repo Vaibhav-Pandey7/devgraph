@@ -1,231 +1,282 @@
 /**
- * coderAgent.js — Coder Agent (All 10 Error Types Addressed)
+ * coderAgent.js — Coder Agent (v3: One File Per Call)
+ * 
+ * KEY CHANGES:
+ * 1. ONE FILE PER LLM CALL — prevents truncation, each response is small
+ * 2. Knows what files exist on disk — won't overwrite scaffold
+ * 3. Validates output path matches requested path
+ * 4. On retry: reads current file from disk, includes executor errors
+ * 5. Shorter system prompt — rules split into backend vs frontend
+ * 6. Protect scaffold files from being overwritten
  */
 
-import { callGemini, makeTokenDelta } from "../utils/gemini.js";
-import { writeFile } from "../utils/sandboxManager.js";
+import { safeCallGemini, makeTokenDelta, emptyTokenDelta } from "../utils/gemini.js";
+import { writeFile, readFile, getFileList } from "../utils/sandboxManager.js";
 
-const CODER_PROMPT = `You are the Coder Agent in an AI software development team.
+// ═══════════════════════════════════════════════════════════
+// SYSTEM PROMPTS — split by file type so each is smaller
+// ═══════════════════════════════════════════════════════════
 
-ROLE: Senior full-stack developer who writes clean, production-quality code.
+const BACKEND_PROMPT = `You are a senior backend developer. Write ONE file.
 
-GOAL: Write ALL files listed in the task. Complete, working, consistent with project patterns.
-
-OUTPUT FORMAT (strict JSON):
+OUTPUT FORMAT (strict JSON — single file only):
 {
-  "files": [
-    {
-      "path": "backend/src/models/todoItem.js",
-      "content": "// Full file content here"
-    }
-  ],
-  "notes": "Brief explanation of key decisions"
+  "path": "backend/src/models/todoItem.js",
+  "content": "// Full file content here",
+  "notes": "Brief explanation"
 }
 
-═══ BACKEND RULES ═══
+RULES:
+- ES module syntax ONLY (import/export, never require)
+- Express: use Router(), router.get/post/put/delete
+- DB: ALWAYS parameterized queries ($1, $2). NEVER string concatenation.
+- Models: return clean data (not raw {rows}). Mark async functions.
+- Response format EVERYWHERE: { success: true/false, data: ... } or { success: false, message: "..." }
+  200: { success: true, data: result }
+  201: { success: true, data: newItem }
+  400: { success: false, message: "Invalid input" }
+  401: { success: false, message: "Unauthorized" }
+  404: { success: false, message: "Not found" }
+  500: { success: false, message: error.message }
+- Auth: JWT Bearer token. req.headers.authorization?.split(' ')[1]. req.user = decoded.
+- Env vars: process.env.DATABASE_URL, process.env.JWT_SECRET, process.env.PORT
+- .js extension in ALL imports (required for ES modules)
+- Write COMPLETE files. No TODO, no placeholders.
+- Keep code concise: 60-120 lines target. No excessive comments.`;
 
-1. MODULES: ES module syntax ONLY (import/export). NEVER use require().
+const FRONTEND_PROMPT = `You are a senior React developer. Write ONE file.
 
-2. EXPRESS PATTERNS: Use Router(), router.get(), router.post(), etc.
+OUTPUT FORMAT (strict JSON — single file only):
+{
+  "path": "frontend/src/pages/DashboardPage.jsx",
+  "content": "// Full file content here",
+  "notes": "Brief explanation"
+}
 
-3. DB QUERIES: ALWAYS parameterized ($1, $2, $3). NEVER string concatenation.
-   CORRECT: pool.query('SELECT * FROM users WHERE id = $1', [id])
-   WRONG:   pool.query('SELECT * FROM users WHERE id = ' + id)
+RULES:
+- Functional components with hooks (useState, useEffect, useContext)
+- Use Tailwind CSS — NO inline styles, NO CSS modules
+- Import api utility: import api from '../utils/api' (already configured with auth)
+- Navigation: import { useNavigate, Link } from 'react-router-dom'
+- ALWAYS include loading state and error state
+- Forms: controlled inputs, onSubmit with e.preventDefault()
+- NEVER use process.env (use import.meta.env for Vite)
 
-4. RETURN VALUES FROM MODELS:
-   - Model methods should return the CLEAN data, not raw pg result
-   - CORRECT: const { rows } = await pool.query(...); return rows[0];
-   - The caller (route) should NOT need to do .rows[0] — the model handles it
-   - Always mark async functions with "async" keyword
-   - Always document return type: returns user object, array, or null
+DESIGN SYSTEM — DARK MODE (follow strictly):
+- Background: bg-gray-950. Cards: bg-gray-900/80 border border-gray-800/60 rounded-2xl p-6
+- Text: text-white (titles), text-gray-300 (body), text-gray-500 (meta)
+- Accent: emerald. Buttons: bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg px-4 py-2.5
+- Inputs: bg-gray-800/50 border border-gray-700 rounded-xl px-4 py-3 text-gray-100 focus:ring-2 focus:ring-emerald-500/40
+- Tables: header text-xs text-gray-500 uppercase. Rows: hover:bg-gray-800/30
+- Loading: animate-pulse skeleton. Empty: centered text-gray-500 message.
+- Nav bar: h-16 bg-gray-900/80 border-b border-gray-800 sticky top-0 z-50
+- Icons: Use Unicode symbols (+ × ← →), NO emoji
+- Write COMPLETE files. No TODO. Keep concise: 60-120 lines.`;
 
-5. ERROR RESPONSE FORMAT (use this EXACT format everywhere):
-   Success: res.status(200).json({ success: true, data: result })
-   Error:   res.status(500).json({ success: false, message: error.message })
-   Created: res.status(201).json({ success: true, data: newItem })
-   Not found: res.status(404).json({ success: false, message: 'Not found' })
-   Validation: res.status(400).json({ success: false, message: 'Invalid input' })
-   Unauthorized: res.status(401).json({ success: false, message: 'Unauthorized' })
-
-6. AUTH PATTERN (follow exactly):
-   - JWT token format: Authorization header with "Bearer <token>"
-   - Token storage: frontend stores in localStorage
-   - Auth middleware extracts token: req.headers.authorization?.split(' ')[1]
-   - After verify: req.user = decoded (contains id, email, role)
-   - Token payload: { id: user.id, email: user.email, role: user.role }
-
-7. ENVIRONMENT VARIABLES:
-   - Backend: import 'dotenv/config' at top of config files ONLY
-   - Use process.env.DATABASE_URL, process.env.JWT_SECRET, process.env.PORT
-   - NEVER use DB_URL, SECRET, or other variations
-   - NEVER use REACT_APP_ prefix (that's CRA, not Vite)
-   - Models should NOT crash if DATABASE_URL is missing — use lazy connection
-
-8. MIDDLEWARE ORDER in app.js/server.js:
-   - cors() FIRST
-   - express.json() SECOND
-   - API routes THIRD (router mounting)
-   - Error handler middleware LAST (app.use((err, req, res, next) => ...))
-
-═══ FRONTEND RULES ═══
-
-9. API CALLS:
-   - Use axios with baseURL from import.meta.env.VITE_API_URL
-   - NEVER use process.env in frontend (Vite uses import.meta.env)
-   - NEVER use REACT_APP_ prefix (that's Create React App, not Vite)
-   - Request body field names MUST EXACTLY match what backend route expects
-   - If backend expects { email, password } → send exactly { email, password }
-   - Auth header: axios.defaults.headers.common['Authorization'] = 'Bearer ' + token
-   - Handle errors: catch(err) → err.response?.data?.message || 'Something went wrong'
-
-10. REACT PATTERNS:
-   - Functional components with hooks (useState, useEffect, useContext)
-   - Use Tailwind CSS — NO inline styles, NO CSS modules, NO styled-components
-   - Always include loading state (show spinner while fetching)
-   - Always include error state (show error message if API fails)
-   - Forms: controlled inputs with useState, onSubmit with e.preventDefault()
-   - Navigation: import { useNavigate, Link } from 'react-router-dom'
-
-11. DESIGN SYSTEM (follow strictly — NO generic AI look):
-   - Background: bg-gray-950
-   - Cards/surfaces: bg-gray-900 border border-gray-800 rounded-xl
-   - Primary accent: emerald (bg-emerald-600, text-emerald-400, hover:bg-emerald-500)
-   - Text: text-gray-100 (primary), text-gray-400 (secondary)
-   - Buttons: bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg px-4 py-2 font-medium transition-colors
-   - Destructive: bg-red-600 hover:bg-red-500
-   - Inputs: bg-gray-800 border-gray-700 rounded-lg px-3 py-2 text-gray-100 placeholder-gray-500 focus:ring-2 focus:ring-emerald-500 focus:border-transparent
-   - Spacing: p-4 md:p-6, gap-4
-   - NO blue default buttons, NO bright white backgrounds, NO system gray
-
-═══ IMPORT RULES ═══
-
-12. FILE PATHS:
-   - ALWAYS use the EXACT importStatement provided in dependencies
-   - If no importStatement provided, use relative paths from the current file location
-   - Count directory depth carefully:
-     from routes/auth.js to models/User.js → '../models/User.js'
-     from routes/auth.js to middleware/auth.js → '../middleware/auth.js'
-     from routes/auth.js to config/db.js → '../config/db.js'
-     from pages/Login.jsx to utils/api.js → '../utils/api.js'
-   - ALWAYS include .js extension in Node.js imports (required for ES modules)
-   - Frontend .jsx files: import components WITHOUT extension
-
-═══ GENERAL ═══
-
-13. Write COMPLETE files — no placeholders, no "// TODO", no "implement here"
-14. Follow the naming map for table names, API paths, file names
-15. If a template file is provided, match its code style exactly
-16. If dependency interfaces say a function is "async", ALWAYS use await when calling it`;
+// Files created by sandbox scaffold — never overwrite these
+const SCAFFOLD_FILES = new Set([
+  "backend/src/index.js",
+  "backend/src/config/db.js",
+  "backend/src/middleware/auth.js",
+  "frontend/index.html",
+  "frontend/src/main.jsx",
+  "frontend/src/App.jsx",
+  "frontend/src/index.css",
+  "frontend/src/utils/api.js",
+  "frontend/tailwind.config.js",
+  "frontend/postcss.config.js",
+  "frontend/vite.config.js",
+]);
 
 export async function coderAgentNode(state) {
-  console.log("\n💻 [Coder Agent] Writing code...\n");
+  console.log("\n[Coder Agent] Writing code...\n");
 
   const { currentTask, contextPackage, sandboxId } = state;
 
   if (!currentTask || !contextPackage) {
-    console.log("   ⚠️ No task or context");
+    console.log("   No task or context");
     return { coderOutput: null };
   }
 
-  // Build focused prompt
-  let userPrompt = `TASK: ${currentTask.title}\n`;
-  userPrompt += `DESCRIPTION: ${currentTask.description}\n\n`;
-  userPrompt += `FILES TO CREATE:\n${contextPackage.task.filesToCreate.map(f => `  - ${f}`).join("\n")}\n\n`;
+  const filesToCreate = contextPackage.task.filesToCreate || [];
+  const isRetry = state.reviewResult?.verdict === "rejected" && (state.reviewResult?.issues?.length > 0);
+  
+  // Get existing files on disk for awareness
+  let existingFiles = [];
+  try { existingFiles = getFileList(sandboxId); } catch (e) {}
 
-  if (contextPackage.task.acceptanceCriteria?.length) {
-    userPrompt += `ACCEPTANCE CRITERIA:\n${contextPackage.task.acceptanceCriteria.map(c => `  ✓ ${c}`).join("\n")}\n\n`;
-  }
-
+  // Build shared context (same for all files in this task)
+  let sharedContext = "";
+  
   // Naming map
   if (contextPackage.namingMap?.length) {
-    userPrompt += `NAMING MAP (use these EXACT names):\n`;
+    sharedContext += `NAMING MAP:\n`;
     contextPackage.namingMap.forEach(n => {
-      userPrompt += `  ${n.entity} → table: ${n.tableName}, api: ${n.apiPath}, model: ${n.modelFile}, route: ${n.routeFile}\n`;
+      sharedContext += `  ${n.entity} → table: ${n.tableName}, api: ${n.apiPath}, model: ${n.modelFile}, route: ${n.routeFile}\n`;
     });
-    userPrompt += "\n";
+    sharedContext += "\n";
   }
 
-  // Patterns
-  const patterns = contextPackage.patterns || {};
-  const hasPatterns = Object.values(patterns).some(v => v && v.length > 0);
-  if (hasPatterns) {
-    userPrompt += `PROJECT PATTERNS:\n`;
-    for (const [key, value] of Object.entries(patterns)) {
-      if (value) userPrompt += `  ${key}: ${value}\n`;
-    }
-    userPrompt += "\n";
-  }
-
-  // Interface-only dependencies with import statements
+  // Dependencies
   const deps = contextPackage.dependencyInterfaces || {};
   if (Object.keys(deps).length > 0) {
-    userPrompt += `DEPENDENCY FILES (use these EXACT import statements):\n`;
-    for (const [path, info] of Object.entries(deps)) {
-      userPrompt += `\n  ${path}:\n`;
-      if (info.importStatement) userPrompt += `    IMPORT: ${info.importStatement}\n`;
-      if (info.interface) userPrompt += `    INTERFACE: ${info.interface}\n`;
+    sharedContext += `EXISTING FILES YOU CAN IMPORT FROM:\n`;
+    for (const [depPath, info] of Object.entries(deps)) {
+      sharedContext += `  ${depPath}: ${info.importStatement || ""}\n`;
+      if (info.interface) sharedContext += `    → ${info.interface}\n`;
     }
-    userPrompt += "\n";
+    sharedContext += "\n";
   }
 
-  // Template file
-  if (contextPackage.templateFile) {
-    userPrompt += `TEMPLATE (match this code style EXACTLY):\n--- ${contextPackage.templateFile.path} ---\n${contextPackage.templateFile.content}\n\n`;
-  }
-
-  // DB schema (filtered)
+  // DB schema
   if (contextPackage.dbSchema) {
-    userPrompt += `DATABASE: ${contextPackage.dbSchema.databaseType}\nTABLES:\n${JSON.stringify(contextPackage.dbSchema.tables, null, 2)}\n\n`;
+    sharedContext += `DATABASE: ${contextPackage.dbSchema.databaseType}\nTABLES: ${JSON.stringify(contextPackage.dbSchema.tables, null, 2)}\n\n`;
   }
 
-  // API endpoints (filtered)
+  // API endpoints (for frontend)
   if (contextPackage.apiEndpoints) {
-    userPrompt += `API ENDPOINTS (use exact paths and request/response fields):\n${JSON.stringify(contextPackage.apiEndpoints, null, 2)}\n\n`;
+    sharedContext += `API ENDPOINTS:\n${JSON.stringify(contextPackage.apiEndpoints, null, 2)}\n\n`;
   }
 
-  userPrompt += `APP: ${contextPackage.appName}\nAUTH: ${contextPackage.authRequired}\n`;
-
-  // Review feedback if retrying
-  const reviewIssues = state.reviewResult?.issues || [];
-  if (reviewIssues.length > 0 && state.reviewResult?.verdict === "rejected") {
-    userPrompt += `\n⚠️ FIX THESE ISSUES:\n`;
-    reviewIssues.forEach(issue => { userPrompt += `  - ${issue}\n`; });
-    userPrompt += "\n";
+  // Scaffold awareness — tell coder what already exists
+  const scaffoldOnDisk = existingFiles.filter(f => SCAFFOLD_FILES.has(f));
+  if (scaffoldOnDisk.length > 0) {
+    sharedContext += `ALREADY EXISTS (do NOT recreate, just import from them):\n`;
+    scaffoldOnDisk.forEach(f => { sharedContext += `  - ${f}\n`; });
+    sharedContext += "\n";
   }
 
-  const result = await callGemini({
-    systemPrompt: CODER_PROMPT,
-    userPrompt,
-    agentName: "coderAgent",
-    currentCost: state.tokenUsage?.estimatedCost || 0,
-    tokenBudget: state.tokenBudget,
-  });
+  // Template
+  if (contextPackage.templateFile) {
+    sharedContext += `STYLE TEMPLATE (match this pattern):\n--- ${contextPackage.templateFile.path} ---\n${contextPackage.templateFile.content}\n\n`;
+  }
 
-  const output = result.parsed;
-  const files = output.files || [];
-
-  // Write files to sandbox
-  let filesWritten = 0;
-  for (const file of files) {
-    if (file.path && file.content) {
-      try {
-        writeFile(sandboxId, file.path, file.content);
-        filesWritten++;
-        console.log(`   ✅ Written: ${file.path} (${file.content.split("\n").length} lines)`);
-      } catch (err) {
-        console.error(`   ❌ Failed to write ${file.path}: ${err.message}`);
-      }
+  // Retry context
+  let retryContext = "";
+  if (isRetry) {
+    retryContext += `\n=== RETRY — FIX THESE ISSUES ===\n`;
+    (state.reviewResult?.issues || []).forEach(issue => { retryContext += `  - ${issue}\n`; });
+    if (state.executionResult?.errors) {
+      retryContext += `\nEXECUTOR ERROR:\n${state.executionResult.errors.slice(0, 400)}\n`;
     }
   }
 
-  console.log(`\n   📝 ${filesWritten} files written to sandbox`);
-  if (output.notes) console.log(`   💡 ${output.notes}`);
+  // ═══════════════════════════════════════════════════════
+  // ONE FILE PER LLM CALL
+  // ═══════════════════════════════════════════════════════
+
+  const allWrittenFiles = [];
+  let totalTokens = { input: 0, output: 0, cost: 0 };
+
+  for (const filePath of filesToCreate) {
+    // Skip scaffold files
+    if (SCAFFOLD_FILES.has(filePath)) {
+      console.log(`   SKIP (scaffold): ${filePath}`);
+      continue;
+    }
+
+    console.log(`   Generating: ${filePath}`);
+
+    const isBackend = filePath.includes("backend");
+    const systemPrompt = isBackend ? BACKEND_PROMPT : FRONTEND_PROMPT;
+
+    // Build per-file prompt
+    let filePrompt = `FILE TO WRITE: ${filePath}\n`;
+    filePrompt += `TASK: ${currentTask.title}\n`;
+    filePrompt += `DESCRIPTION: ${currentTask.description || ""}\n\n`;
+
+    if (contextPackage.task.acceptanceCriteria?.length) {
+      filePrompt += `ACCEPTANCE CRITERIA:\n${contextPackage.task.acceptanceCriteria.map(c => `  - ${c}`).join("\n")}\n\n`;
+    }
+
+    filePrompt += sharedContext;
+
+    // On retry: include current file from disk
+    if (isRetry) {
+      filePrompt += retryContext;
+      try {
+        const currentContent = readFile(sandboxId, filePath);
+        if (currentContent) {
+          filePrompt += `\nCURRENT FILE ON DISK (fix it, don't rewrite from scratch):\n--- ${filePath} ---\n${currentContent}\n`;
+        }
+      } catch (e) {}
+    }
+
+    filePrompt += `\nAPP: ${contextPackage.appName}\nOUTPUT: Return JSON with path, content, notes. The "path" MUST be exactly "${filePath}".\n`;
+
+    const result = await safeCallGemini({
+      systemPrompt,
+      userPrompt: filePrompt,
+      agentName: "coderAgent",
+      currentCost: state.tokenUsage?.estimatedCost + totalTokens.cost || 0,
+      tokenBudget: state.tokenBudget,
+    });
+
+    if (!result.ok) {
+      console.error(`   FAILED: ${filePath} — ${result.error}`);
+      allWrittenFiles.push({ path: filePath, lines: 0, error: result.error });
+      continue;
+    }
+
+    // Parse — handle both single file and files array format
+    let fileData = result.parsed;
+    if (fileData.files && Array.isArray(fileData.files)) {
+      fileData = fileData.files[0] || {};
+    }
+
+    const outputPath = fileData.path || filePath;
+    const content = fileData.content || "";
+
+    if (!content) {
+      console.error(`   EMPTY: ${filePath} — LLM returned no content`);
+      allWrittenFiles.push({ path: filePath, lines: 0, error: "Empty content" });
+      continue;
+    }
+
+    // Path validation: warn if LLM returned different path
+    let writePath = filePath; // Always write to the REQUESTED path
+    if (outputPath !== filePath) {
+      console.warn(`   PATH MISMATCH: requested "${filePath}" but LLM returned "${outputPath}". Using requested path.`);
+    }
+
+    // Write protection: don't overwrite scaffold on first attempt (retry is OK)
+    if (SCAFFOLD_FILES.has(writePath) && !isRetry) {
+      console.log(`   PROTECTED: ${writePath} (scaffold file, skipping)`);
+      continue;
+    }
+
+    // Write to disk
+    try {
+      writeFile(sandboxId, writePath, content);
+      const lines = content.split("\n").length;
+      console.log(`   OK: ${writePath} (${lines} lines)`);
+      allWrittenFiles.push({ path: writePath, lines });
+    } catch (err) {
+      console.error(`   WRITE FAILED: ${writePath} — ${err.message}`);
+      allWrittenFiles.push({ path: writePath, lines: 0, error: err.message });
+    }
+
+    // Accumulate tokens
+    totalTokens.input += result.tokens.input;
+    totalTokens.output += result.tokens.output;
+    totalTokens.cost += result.tokens.cost;
+  }
+
+  // ═══════════════════════════════════════════════════════
+
+  const successCount = allWrittenFiles.filter(f => !f.error).length;
+  const failCount = allWrittenFiles.filter(f => f.error).length;
+  console.log(`\n   Done: ${successCount} written, ${failCount} failed`);
+
+  // If ALL files failed, mark as error for reviewer to reject
+  const allFailed = successCount === 0 && filesToCreate.length > 0;
 
   return {
     coderOutput: {
-      files: files.map(f => ({ path: f.path, lines: f.content?.split("\n").length || 0 })),
-      notes: output.notes,
+      files: allWrittenFiles,
+      notes: allFailed ? "All files failed to generate" : `${successCount} files written`,
+      error: allFailed,
     },
-    tokenUsage: makeTokenDelta("coderAgent", result.tokens),
+    tokenUsage: makeTokenDelta("coderAgent", totalTokens),
   };
 }
