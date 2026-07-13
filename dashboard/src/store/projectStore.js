@@ -1,6 +1,6 @@
 /**
  * store/projectStore.js — Zustand State Management
- * 
+ *
  * The dashboard needs to track:
  *   1. Connection state (connected/disconnected to WS)
  *   2. Project metadata (id, requirement, status)
@@ -9,7 +9,7 @@
  *   5. Outputs (spec, blueprint, taskQueue, code files)
  *   6. Token usage (live cost tracking)
  *   7. Human input state (questions pending, escalation pending)
- * 
+ *
  * Why Zustand over Redux/Context?
  * - Zero boilerplate, works outside React (the WS hook updates it)
  * - Selective subscriptions (components only re-render for their slice)
@@ -30,8 +30,12 @@ export const PIPELINE_PHASES = {
   architect: {
     label: "Architect",
     nodes: [
-      "architectStep1", "architectStep2", "architectStep3",
-      "architectStep4", "architectStep5", "blueprintValidator",
+      "architectStep1",
+      "architectStep2",
+      "architectStep3",
+      "architectStep4",
+      "architectStep5",
+      "blueprintValidator",
     ],
   },
   planner: {
@@ -41,10 +45,19 @@ export const PIPELINE_PHASES = {
   dev_loop: {
     label: "Dev Loop",
     nodes: [
-      "selectNextTask", "contextBuilder", "coderAgent", "updateRegistry",
-      "reviewerAgent", "executorAgent", "snapshotManager",
-      "debuggerAgent", "simplifyTask", "humanEscalation",
-      "phaseVerification", "patternExtractor", "stateCompactor",
+      "selectNextTask",
+      "contextBuilder",
+      "coderAgent",
+      "updateRegistry",
+      "reviewerAgent",
+      "executorAgent",
+      "snapshotManager",
+      "debuggerAgent",
+      "simplifyTask",
+      "humanEscalation",
+      "phaseVerification",
+      "patternExtractor",
+      "stateCompactor",
     ],
   },
   deploy: {
@@ -116,7 +129,12 @@ const useProjectStore = create((set, get) => ({
       coderOutput: null,
       reviewResult: null,
       executionResult: null,
-      tokenUsage: { calls: [], totalInput: 0, totalOutput: 0, estimatedCost: 0 },
+      tokenUsage: {
+        calls: [],
+        totalInput: 0,
+        totalOutput: 0,
+        estimatedCost: 0,
+      },
       humanInputRequest: null,
       error: null,
     }),
@@ -202,7 +220,9 @@ const useProjectStore = create((set, get) => ({
         break;
 
       case "blueprint_update":
-        set({ blueprint: event.blueprint });
+        set((state) => ({
+          blueprint: { ...state.blueprint, ...event.blueprint },
+        }));
         break;
 
       case "validation_result":
@@ -240,7 +260,23 @@ const useProjectStore = create((set, get) => ({
         break;
 
       case "token_update":
-        set({ tokenUsage: event.usage });
+        set((state) => {
+          const prev = state.tokenUsage || {
+            calls: [],
+            totalInput: 0,
+            totalOutput: 0,
+            estimatedCost: 0,
+          };
+          const delta = event.usage || {};
+          return {
+            tokenUsage: {
+              calls: [...prev.calls, ...(delta.newCalls || [])],
+              totalInput: prev.totalInput + (delta.addedInput || 0),
+              totalOutput: prev.totalOutput + (delta.addedOutput || 0),
+              estimatedCost: prev.estimatedCost + (delta.addedCost || 0),
+            },
+          };
+        });
         break;
 
       case "human_input_needed":
@@ -316,7 +352,12 @@ const useProjectStore = create((set, get) => ({
       coderOutput: null,
       reviewResult: null,
       executionResult: null,
-      tokenUsage: { calls: [], totalInput: 0, totalOutput: 0, estimatedCost: 0 },
+      tokenUsage: {
+        calls: [],
+        totalInput: 0,
+        totalOutput: 0,
+        estimatedCost: 0,
+      },
       humanInputRequest: null,
       error: null,
       finalState: null,

@@ -78,8 +78,8 @@ async function start() {
   console.log("");
   console.log("╔══════════════════════════════════════════════════════════╗");
   console.log("║                                                          ║");
-  console.log("║   🤖  AI DEV TEAM — Mission Control Server              ║");
-  console.log("║   Phase 7: Web Dashboard                                 ║");
+  console.log("║   🤖  DevGraph-An Autonomous AI Agent Dev Software      ║");
+  console.log("║                                                          ║");
   console.log("║                                                          ║");
   console.log("╚══════════════════════════════════════════════════════════╝");
   console.log("");
