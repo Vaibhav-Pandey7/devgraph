@@ -248,7 +248,9 @@ const useProjectStore = create((set, get) => ({
         break;
 
       case "code_written":
-        set({ coderOutput: event.files });
+        set((state) => ({
+          coderOutput: [...(state.coderOutput || []), ...(event.files || [])],
+        }));
         break;
 
       case "review_result":

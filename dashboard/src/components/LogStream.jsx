@@ -51,7 +51,7 @@ function getEventDetail(event) {
     case "execution_result":
       return event.execution?.result?.toUpperCase() || "";
     case "token_update":
-      return `$${(event.usage?.estimatedCost || 0).toFixed(4)}`;
+      return `$${(event.usage?.addedCost || 0).toFixed(4)}`;
     case "human_input_needed":
       return event.inputType === "pm_clarification" ? "PM questions" : "Escalation";
     case "error":
