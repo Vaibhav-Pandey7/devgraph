@@ -71,7 +71,7 @@ export async function simplifyTaskNode(state) {
       }
     }
   }
-
+  updatedQueue.totalTasks = (updatedQueue.totalTasks || 0) + (subTasks.length - 1);
   return {
     taskQueue: updatedQueue,
     taskStatuses: newStatuses,

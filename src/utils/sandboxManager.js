@@ -489,8 +489,10 @@ function generateCreateTableSQL(dbSchema) {
     if (table.foreignKeys) {
       for (const fk of table.foreignKeys) {
         statements.push(
-          `ALTER TABLE ${table.name} ADD CONSTRAINT IF NOT EXISTS fk_${table.name}_${fk.field} ` +
-          `FOREIGN KEY (${fk.field}) REFERENCES ${fk.references} ON DELETE ${fk.onDelete || "CASCADE"};`
+          `DO $$ BEGIN ` +
+          `ALTER TABLE ${table.name} ADD CONSTRAINT fk_${table.name}_${fk.field} ` +
+          `FOREIGN KEY (${fk.field}) REFERENCES ${fk.references} ON DELETE ${fk.onDelete || "CASCADE"}; ` +
+          `EXCEPTION WHEN duplicate_object THEN NULL; END $$;`
         );
       }
     }
@@ -560,7 +562,7 @@ export async function healthCheck(sandboxId) {
     const result = dockerExec(sandbox.frontendContainerId, "node --version", 5000);
     if (result.exitCode !== 0) failures.push("Frontend container not responding");
   } else {
-    failures.push("No frontend container");
+    failures.push("No frontend container"); 
   }
 
   // Check tables exist (PostgreSQL)
