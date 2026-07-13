@@ -1,17 +1,17 @@
 /**
  * deploymentVerifier.js — Generate & Verify Docker Deployment
- * 
+ *
  * The LLM should NOT generate Dockerfiles or docker-compose.yml because:
  * 1. It doesn't know the exact sandbox directory structure
  * 2. It doesn't know which port the backend listens on
  * 3. It doesn't know the container names on the Docker network
  * 4. It doesn't know the entry point path (src/index.js vs src/server.js)
- * 
+ *
  * Instead, WE generate these files deterministically based on:
  * - The sandbox's package.json (knows the entry point)
  * - The blueprint's DB type (postgres vs mongo)
  * - Fixed conventions (backend on :5000, frontend on :5173)
- * 
+ *
  * Then we verify by running docker-compose up and testing endpoints.
  */
 
@@ -45,7 +45,12 @@ function detectBackendEntry(sandboxPath) {
 
   // Fallback: check package.json
   try {
-    const pkg = JSON.parse(fs.readFileSync(path.join(sandboxPath, "backend", "package.json"), "utf-8"));
+    const pkg = JSON.parse(
+      fs.readFileSync(
+        path.join(sandboxPath, "backend", "package.json"),
+        "utf-8",
+      ),
+    );
     if (pkg.main) return pkg.main;
     if (pkg.scripts?.start) {
       const match = pkg.scripts.start.match(/node\s+(.+)/);
@@ -61,7 +66,12 @@ function detectBackendEntry(sandboxPath) {
  */
 function detectDbType(sandboxPath) {
   try {
-    const pkg = JSON.parse(fs.readFileSync(path.join(sandboxPath, "backend", "package.json"), "utf-8"));
+    const pkg = JSON.parse(
+      fs.readFileSync(
+        path.join(sandboxPath, "backend", "package.json"),
+        "utf-8",
+      ),
+    );
     if (pkg.dependencies?.mongoose || pkg.dependencies?.mongodb) return "mongo";
   } catch (e) {}
   return "postgres";
@@ -75,17 +85,20 @@ function generateDeploymentFiles(sandboxPath) {
   const dbType = detectDbType(sandboxPath);
   const dbImage = dbType === "mongo" ? "mongo:7" : "postgres:16-alpine";
   const dbPort = dbType === "mongo" ? "27017" : "5432";
-  const dbEnv = dbType === "mongo"
-    ? "MONGO_INITDB_DATABASE: appdb"
-    : `POSTGRES_USER: postgres
+  const dbEnv =
+    dbType === "mongo"
+      ? "MONGO_INITDB_DATABASE: appdb"
+      : `POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: appdb`;
-  const dbUrl = dbType === "mongo"
-    ? "mongodb://db:27017/appdb"
-    : "postgresql://postgres:postgres@db:5432/appdb";
-  const dbHealthCheck = dbType === "mongo"
-    ? 'mongosh --eval "db.runCommand({ping:1})" --quiet'
-    : "pg_isready -U postgres";
+  const dbUrl =
+    dbType === "mongo"
+      ? "mongodb://db:27017/appdb"
+      : "postgresql://postgres:postgres@db:5432/appdb";
+  const dbHealthCheck =
+    dbType === "mongo"
+      ? 'mongosh --eval "db.runCommand({ping:1})" --quiet'
+      : "pg_isready -U postgres";
   const dbHealthInterval = "5s";
 
   console.log(`   Detected entry point: ${entryPoint}`);
@@ -100,7 +113,10 @@ COPY . .
 EXPOSE 5000
 CMD ["node", "${entryPoint}"]
 `;
-  fs.writeFileSync(path.join(sandboxPath, "backend", "Dockerfile"), backendDockerfile);
+  fs.writeFileSync(
+    path.join(sandboxPath, "backend", "Dockerfile"),
+    backendDockerfile,
+  );
   console.log("   Generated: backend/Dockerfile");
 
   // ─── Frontend Dockerfile (multi-stage: build with vite, serve with nginx) ──
@@ -116,8 +132,27 @@ COPY --from=build /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 EXPOSE 80
 `;
-  fs.writeFileSync(path.join(sandboxPath, "frontend", "Dockerfile"), frontendDockerfile);
+  fs.writeFileSync(
+    path.join(sandboxPath, "frontend", "Dockerfile"),
+    frontendDockerfile,
+  );
   console.log("   Generated: frontend/Dockerfile");
+
+  // ─── .dockerignore (prevents Windows/Linux symlink mismatch from breaking the build) ──
+  const dockerignore = `node_modules
+  npm-debug.log
+  .env
+  .git
+  `;
+  fs.writeFileSync(
+    path.join(sandboxPath, "backend", ".dockerignore"),
+    dockerignore,
+  );
+  fs.writeFileSync(
+    path.join(sandboxPath, "frontend", ".dockerignore"),
+    dockerignore,
+  );
+  console.log("   Generated: .dockerignore (backend + frontend)");
 
   // ─── Nginx config (proxy /api to backend, serve SPA for everything else) ──
   const nginxConf = `server {
@@ -196,25 +231,28 @@ volumes:
   // ─── Ensure .env files exist ───────────────────────────
   const backendEnv = path.join(sandboxPath, "backend", ".env");
   if (!fs.existsSync(backendEnv)) {
-    fs.writeFileSync(backendEnv, [
-      `DATABASE_URL=${dbUrl}`,
-      "JWT_SECRET=dev-secret-change-in-production",
-      "PORT=5000",
-      "NODE_ENV=production",
-    ].join("\n") + "\n");
+    fs.writeFileSync(
+      backendEnv,
+      [
+        `DATABASE_URL=${dbUrl}`,
+        "JWT_SECRET=dev-secret-change-in-production",
+        "PORT=5000",
+        "NODE_ENV=production",
+      ].join("\n") + "\n",
+    );
   }
 
   const frontendEnv = path.join(sandboxPath, "frontend", ".env");
   if (!fs.existsSync(frontendEnv)) {
-    fs.writeFileSync(frontendEnv, [
-      `VITE_API_URL=/api`,
-    ].join("\n") + "\n");
+    fs.writeFileSync(frontendEnv, [`VITE_API_URL=/api`].join("\n") + "\n");
   }
 
   // ─── Also ensure frontend has a vite.config if missing ──
   const viteConfig = path.join(sandboxPath, "frontend", "vite.config.js");
   if (!fs.existsSync(viteConfig)) {
-    fs.writeFileSync(viteConfig, `import { defineConfig } from 'vite';
+    fs.writeFileSync(
+      viteConfig,
+      `import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
 export default defineConfig({
@@ -225,26 +263,35 @@ export default defineConfig({
     }
   }
 });
-`);
+`,
+    );
     console.log("   Generated: frontend/vite.config.js");
   }
 
   return { entryPoint, dbType };
 }
 
-
 export async function deploymentVerifierNode(state) {
   const attempts = state.deploymentAttempts || 0;
 
   if (attempts >= 2) {
-    console.log("\n[Deployment Verifier] Max attempts reached. Presenting project as-is.\n");
+    console.log(
+      "\n[Deployment Verifier] Max attempts reached. Presenting project as-is.\n",
+    );
     return {
       deploymentAttempts: attempts,
-      executionResult: { result: "pass", output: "Skipped — max attempts. Code is complete, docker-compose may need manual fixes.", errors: "" },
+      executionResult: {
+        result: "pass",
+        output:
+          "Skipped — max attempts. Code is complete, docker-compose may need manual fixes.",
+        errors: "",
+      },
     };
   }
 
-  console.log(`\n[Deployment Verifier] Setting up deployment (attempt ${attempts + 1}/2)...\n`);
+  console.log(
+    `\n[Deployment Verifier] Setting up deployment (attempt ${attempts + 1}/2)...\n`,
+  );
 
   const sandboxPath = getSandboxPath(state.sandboxId);
 
@@ -252,7 +299,11 @@ export async function deploymentVerifierNode(state) {
     console.log("   No sandbox path — skipping");
     return {
       deploymentAttempts: attempts + 1,
-      executionResult: { result: "pass", output: "Skipped — no sandbox", errors: "" },
+      executionResult: {
+        result: "pass",
+        output: "Skipped — no sandbox",
+        errors: "",
+      },
     };
   }
 
@@ -267,7 +318,11 @@ export async function deploymentVerifierNode(state) {
 
     // ─── Step 2: Build ──────────────────────────────────────
     console.log("   Building containers (this may take a minute)...");
-    const buildResult = runInSandbox(sandboxPath, "docker-compose build --no-cache 2>&1", 300000);
+    const buildResult = runInSandbox(
+      sandboxPath,
+      "docker-compose build --no-cache 2>&1",
+      300000,
+    );
 
     if (buildResult.exitCode !== 0) {
       const fullLog = (buildResult.stdout + "\n" + buildResult.stderr).trim();
@@ -283,7 +338,11 @@ export async function deploymentVerifierNode(state) {
     console.log("   Starting services...");
     runInSandbox(sandboxPath, "docker-compose down 2>&1", 15000);
 
-    const upResult = runInSandbox(sandboxPath, "docker-compose up -d 2>&1", 60000);
+    const upResult = runInSandbox(
+      sandboxPath,
+      "docker-compose up -d 2>&1",
+      60000,
+    );
     if (upResult.exitCode !== 0) {
       const fullLog = (upResult.stdout + "\n" + upResult.stderr).trim();
       errors.push(`docker-compose up failed:\n${fullLog.slice(-500)}`);
@@ -303,7 +362,10 @@ export async function deploymentVerifierNode(state) {
     let backendOk = false;
 
     for (const testPath of ["/api/health", "/api", "/health", "/"]) {
-      const result = testEndpoint(`http://localhost:${BACKEND_PORT}${testPath}`, 5000);
+      const result = testEndpoint(
+        `http://localhost:${BACKEND_PORT}${testPath}`,
+        5000,
+      );
       if (result.success) {
         outputs.push(`Backend responds at ${testPath}: ${result.status}`);
         backendOk = true;
@@ -312,7 +374,11 @@ export async function deploymentVerifierNode(state) {
     }
 
     if (!backendOk) {
-      const logs = runInSandbox(sandboxPath, "docker-compose logs --tail=30 backend 2>&1", 10000);
+      const logs = runInSandbox(
+        sandboxPath,
+        "docker-compose logs --tail=30 backend 2>&1",
+        10000,
+      );
       console.log("   Backend logs:");
       console.log(logs.stdout.slice(-500));
       errors.push(`Backend not responding. Logs:\n${logs.stdout.slice(-300)}`);
@@ -320,12 +386,19 @@ export async function deploymentVerifierNode(state) {
 
     // ─── Step 6: Test frontend ──────────────────────────────
     console.log(`   Testing frontend at localhost:${FRONTEND_PORT}...`);
-    const frontendTest = testEndpoint(`http://localhost:${FRONTEND_PORT}`, 10000);
+    const frontendTest = testEndpoint(
+      `http://localhost:${FRONTEND_PORT}`,
+      10000,
+    );
 
     if (frontendTest.success) {
       outputs.push(`Frontend responds: ${frontendTest.status}`);
     } else {
-      const logs = runInSandbox(sandboxPath, "docker-compose logs --tail=30 frontend 2>&1", 10000);
+      const logs = runInSandbox(
+        sandboxPath,
+        "docker-compose logs --tail=30 frontend 2>&1",
+        10000,
+      );
       console.log("   Frontend logs:");
       console.log(logs.stdout.slice(-500));
       errors.push(`Frontend not responding. Logs:\n${logs.stdout.slice(-300)}`);
@@ -333,7 +406,11 @@ export async function deploymentVerifierNode(state) {
 
     // ─── Step 7: Test DB ────────────────────────────────────
     console.log("   Testing database...");
-    const dbTest = runInSandbox(sandboxPath, "docker-compose exec -T db pg_isready -U postgres 2>&1", 10000);
+    const dbTest = runInSandbox(
+      sandboxPath,
+      "docker-compose exec -T db pg_isready -U postgres 2>&1",
+      10000,
+    );
     if (dbTest.exitCode === 0) {
       outputs.push("Database accepting connections");
     } else {
@@ -353,9 +430,10 @@ export async function deploymentVerifierNode(state) {
     }
 
     return buildVerifyResult(passed, outputs, errors, attempts + 1);
-
   } catch (e) {
-    try { runInSandbox(sandboxPath, "docker-compose down 2>&1", 15000); } catch (err) {}
+    try {
+      runInSandbox(sandboxPath, "docker-compose down 2>&1", 15000);
+    } catch (err) {}
     errors.push(`Verification error: ${e.message}`);
     return buildVerifyResult(false, outputs, errors, attempts + 1);
   }
@@ -387,11 +465,16 @@ function testEndpoint(url, timeout = 10000) {
   try {
     const result = execSync(
       `curl -s -o /tmp/curl_body -w "%{http_code}" --max-time ${Math.floor(timeout / 1000)} "${url}"`,
-      { encoding: "utf-8", timeout: timeout + 2000, stdio: "pipe" }
+      { encoding: "utf-8", timeout: timeout + 2000, stdio: "pipe" },
     );
     const status = parseInt(result.trim());
     let body = "";
-    try { body = execSync("cat /tmp/curl_body", { encoding: "utf-8", stdio: "pipe" }); } catch (e) {}
+    try {
+      body = execSync("cat /tmp/curl_body", {
+        encoding: "utf-8",
+        stdio: "pipe",
+      });
+    } catch (e) {}
     return { success: status >= 200 && status < 500, status, body };
   } catch (e) {
     return { success: false, status: 0, body: e.message };
@@ -399,13 +482,13 @@ function testEndpoint(url, timeout = 10000) {
 }
 
 function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function buildVerifyResult(passed, outputs, errors, attempts) {
   console.log(`\n   ${passed ? "VERIFIED" : "FAILED"}`);
-  outputs.forEach(o => console.log(`   + ${o}`));
-  if (errors.length) errors.forEach(e => console.log(`   - ${e}`));
+  outputs.forEach((o) => console.log(`   + ${o}`));
+  if (errors.length) errors.forEach((e) => console.log(`   - ${e}`));
 
   return {
     deploymentAttempts: attempts,
@@ -416,7 +499,12 @@ function buildVerifyResult(passed, outputs, errors, attempts) {
     },
     deploymentConfig: {
       platform: "docker-compose",
-      files: ["docker-compose.yml", "backend/Dockerfile", "frontend/Dockerfile", "frontend/nginx.conf"],
+      files: [
+        "docker-compose.yml",
+        "backend/Dockerfile",
+        "frontend/Dockerfile",
+        "frontend/nginx.conf",
+      ],
       instructions: [
         "cd sandboxes/<sandbox-id>",
         "docker-compose up --build",
