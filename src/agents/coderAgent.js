@@ -1,7 +1,6 @@
 /**
  * coderAgent.js — Coder Agent (v3: One File Per Call)
- * 
- * KEY CHANGES:
+ * * KEY CHANGES:
  * 1. ONE FILE PER LLM CALL — prevents truncation, each response is small
  * 2. Knows what files exist on disk — won't overwrite scaffold
  * 3. Validates output path matches requested path
@@ -169,12 +168,6 @@ export async function coderAgentNode(state) {
   let totalTokens = { input: 0, output: 0, cost: 0 };
 
   for (const filePath of filesToCreate) {
-    // Skip scaffold files
-    if (SCAFFOLD_FILES.has(filePath)) {
-      console.log(`   SKIP (scaffold): ${filePath}`);
-      continue;
-    }
-
     console.log(`   Generating: ${filePath}`);
 
     const isBackend = filePath.includes("backend");
@@ -191,15 +184,20 @@ export async function coderAgentNode(state) {
 
     filePrompt += sharedContext;
 
-    // On retry: include current file from disk
+    // FIX: Read existing content for BOTH retries AND scaffold files
+    let existingContent = "";
+    try {
+      existingContent = readFile(sandboxId, filePath);
+    } catch(e) {}
+
     if (isRetry) {
       filePrompt += retryContext;
-      try {
-        const currentContent = readFile(sandboxId, filePath);
-        if (currentContent) {
-          filePrompt += `\nCURRENT FILE ON DISK (fix it, don't rewrite from scratch):\n--- ${filePath} ---\n${currentContent}\n`;
-        }
-      } catch (e) {}
+      if (existingContent) {
+        filePrompt += `\nCURRENT FILE ON DISK (fix it, don't rewrite from scratch):\n--- ${filePath} ---\n${existingContent}\n`;
+      }
+    } else if (SCAFFOLD_FILES.has(filePath) && existingContent) {
+      // If it's a scaffold file AND we have existing content, tell the LLM to update it
+      filePrompt += `\nTHIS IS A SCAFFOLD FILE. It already contains basic setup:\n--- ${filePath} ---\n${existingContent}\n\nYOUR TASK: Update this file with the required logic. Ensure you keep the existing structure but add the new requirements.\n`;
     }
 
     filePrompt += `\nAPP: ${contextPackage.appName}\nOUTPUT: Return JSON with path, content, notes. The "path" MUST be exactly "${filePath}".\n`;
@@ -237,12 +235,6 @@ export async function coderAgentNode(state) {
     let writePath = filePath; // Always write to the REQUESTED path
     if (outputPath !== filePath) {
       console.warn(`   PATH MISMATCH: requested "${filePath}" but LLM returned "${outputPath}". Using requested path.`);
-    }
-
-    // Write protection: don't overwrite scaffold on first attempt (retry is OK)
-    if (SCAFFOLD_FILES.has(writePath) && !isRetry) {
-      console.log(`   PROTECTED: ${writePath} (scaffold file, skipping)`);
-      continue;
     }
 
     // Write to disk

@@ -268,6 +268,40 @@ export default defineConfig({
     console.log("   Generated: frontend/vite.config.js");
   }
 
+  // ─── Ensure Vite entry points exist (INDEX.HTML & MAIN.JSX FIX) ──
+  const indexHtml = path.join(sandboxPath, "frontend", "index.html");
+  if (!fs.existsSync(indexHtml)) {
+    fs.writeFileSync(indexHtml, `<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI Generated App</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>`);
+    console.log("   Generated fallback: frontend/index.html");
+  }
+
+  const mainJsxPath = path.join(sandboxPath, "frontend", "src");
+  if (!fs.existsSync(mainJsxPath)) fs.mkdirSync(mainJsxPath, { recursive: true });
+  const mainJsx = path.join(mainJsxPath, "main.jsx");
+  if (!fs.existsSync(mainJsx)) {
+    fs.writeFileSync(mainJsx, `import React from 'react';
+import ReactDOM from 'react-dom/client';
+import App from './App.jsx';
+
+ReactDOM.createRoot(document.getElementById('root')).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);`);
+    console.log("   Generated fallback: frontend/src/main.jsx");
+  }
+
   return { entryPoint, dbType };
 }
 

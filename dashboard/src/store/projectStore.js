@@ -205,6 +205,7 @@ const useProjectStore = create((set, get) => ({
       case "node_complete":
         set((state) => ({
           activeNode: null,
+          humanInputRequest: null, // <-- ADD THIS LINE
           completedNodes: state.completedNodes.includes(event.node)
             ? state.completedNodes
             : [...state.completedNodes, event.node],
@@ -237,8 +238,36 @@ const useProjectStore = create((set, get) => ({
         set({ sandboxId: event.sandboxId, sandboxHealthy: event.healthy });
         break;
 
-      case "task_started":
-        set({ currentTask: event.task });
+case "task_started":
+        set((state) => {
+          const newTask = event.task;
+          if (!newTask) return { currentTask: null };
+
+          // Deep clone the queue to safely mutate it
+          const queue = state.taskQueue ? JSON.parse(JSON.stringify(state.taskQueue)) : { phases: [] };
+          
+          // Does this task already exist in our planned phases?
+          const exists = queue.phases.some((p) => 
+            p.tasks && p.tasks.some((t) => t.taskId === newTask.taskId)
+          );
+
+          // If it's a surprise dynamic task from the backend, inject it!
+          if (!exists) {
+            // Check if we already created a dynamic phase
+            let sysPhase = queue.phases.find((p) => p.phaseName === "System Operations");
+            if (!sysPhase) {
+              sysPhase = { 
+                phaseNumber: queue.phases.length + 1, 
+                phaseName: "System Operations", 
+                tasks: [] 
+              };
+              queue.phases.push(sysPhase);
+            }
+            sysPhase.tasks.push(newTask);
+          }
+
+          return { currentTask: newTask, taskQueue: queue };
+        });
         break;
 
       case "task_progress":
@@ -323,7 +352,7 @@ const useProjectStore = create((set, get) => ({
         break;
 
       case "run_started":
-        set({ status: "running" });
+        set({ status: "running", humanInputRequest: null });
         break;
 
       default:

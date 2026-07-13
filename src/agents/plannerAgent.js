@@ -1,7 +1,6 @@
 /**
  * plannerAgent.js — Planner Agent
- * 
- * Now includes Phase 6: deployment (Dockerfiles + docker-compose)
+ * * Now includes Phase 6: deployment (Dockerfiles + docker-compose)
  * so the generated project can run with: docker-compose up
  */
 
@@ -58,18 +57,18 @@ RULES:
 - Keep task count 15-25 for a typical CRUD app.
 
 IMPORTANT — THESE FILES ALREADY EXIST (scaffolded automatically, do NOT create them):
-- backend/src/config/db.js (DB connection pool)
-- backend/src/middleware/auth.js (JWT auth middleware)
 - backend/src/index.js (Express entry — routes are auto-wired after your route tasks complete)
 - frontend/index.html, frontend/src/main.jsx, frontend/src/App.jsx (auto-assembled)
 - frontend/src/index.css, frontend/tailwind.config.js, frontend/postcss.config.js, frontend/vite.config.js
 - frontend/src/utils/api.js (axios instance with auth interceptor)
 - .gitignore, all .env files
 
-So your Phase 1 (setup) should ONLY create files that are project-SPECIFIC:
-- Maybe a frontend AuthContext if auth is needed
-- Maybe backend utility helpers specific to this app
-- Do NOT recreate db.js, auth middleware, api.js, or config files.
+So your Phase 1 (setup) MUST create the foundational backend logic:
+- backend/src/config/db.js (DB connection setup using Postgres or Mongoose)
+- backend/src/middleware/auth.js (JWT auth middleware)
+- backend/src/middleware/errorHandler.js
+- Any custom frontend context providers (e.g., AuthContext)
+- Do NOT recreate index.js, App.jsx, or api.js.
 
 Phase 6 (integration): Do NOT create backend/src/index.js or frontend/src/App.jsx — they are AUTO-ASSEMBLED from the route and page files you create in earlier phases. If you need an integration task, use it for wiring specific features (e.g. a shared layout component, or connecting auth flow).
 
@@ -121,7 +120,6 @@ export async function plannerAgentNode(state) {
     currentCost: state.tokenUsage?.estimatedCost || 0,
     tokenBudget: state.tokenBudget,
   });
-
 
   if (!result.ok) {
     console.error(`   [plannerAgent] LLM failed: ${result.error}`);
